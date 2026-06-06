@@ -1,63 +1,48 @@
-use std::io::{Read, Write};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use anyhow::Result;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    time,
 };
 
-struct Server {
-    address: String,
-    is_alive: bool,
-}
+pub use crate::constants::*;
 
-impl Server {
-    fn new(address: String) -> Self {
-        Self {
-            address,
-            is_alive: true,
-        }
-    }
-}
-
-struct Pool {
-    servers: Vec<Server>,
-    next_available_ind: usize,
-}
-
-impl Pool {
-    fn new(servers: Vec<Server>) -> Self {
-        Self {
-            servers,
-            next_available_ind: 0,
-        }
-    }
-
-    fn next_server(&mut self) -> Option<&Server> {
-        for (ind, server) in self.servers.iter().enumerate() {
-            if server.is_alive {
-                self.next_available_ind = ind;
-                return Some(server);
-            }
-        }
-
-        None
-    }
-}
+mod constants;
+mod pool;
+use pool::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:8085").await?;
-    let mut pool = Pool::new(vec![
+    let pool = Pool::new(vec![
         Server::new("127.0.0.1:9000".into()),
         Server::new("127.0.0.1:9001".into()),
     ]);
+    let pool = Arc::new(Mutex::new(pool));
+
+    let mut interval = time::interval(Duration::from_secs(5));
+
+    let pool_1 = Arc::clone(&pool);
+    tokio::spawn(async move {
+        loop {
+            interval.tick().await;
+            let mut pool_gaurd = pool_1.lock().unwrap();
+            pool_gaurd.test_servers();
+        }
+    });
 
     while let Ok((mut client_stream, _)) = listener.accept().await {
         let mut buf = [0; 4096];
         let n = client_stream.read(&mut buf).await?;
 
-        if let Some(next_server) = pool.next_server() {
+        let mut pool_gaurd = pool.lock().unwrap();
+
+        if let Some(next_server) = pool_gaurd.next_server() {
             let address = &next_server.address;
             let mut sever_stream = TcpStream::connect(address).await?;
             let mut response_bytes = Vec::new();
