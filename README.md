@@ -1,15 +1,16 @@
 # load-balancer
 
-A small TCP load balancer written in Rust. It accepts client connections, forwards raw bytes to a healthy backend, and returns the backend response to the client.
+A small TCP load balancer written in Rust. It accepts client connections, forwards raw bytes to a healthy backend using **round robin**, and returns the backend response to the client.
 
 This project is a learning exercise in networking: TCP listeners, connection pooling, health checks, and YAML-based configuration.
 
 ## Features
 
 - **TCP proxy** — reads a client request and forwards it to a backend over TCP
+- **Round robin** — distributes requests across healthy backends in rotation
 - **Backend pool** — multiple backends defined in a config file
-- **Periodic health checks** — probes backends on an interval and marks unreachable ones as unhealthy
-- **YAML configuration** — listen address, backends, and health-check settings without recompiling
+- **Periodic health checks** — probes backends on an interval; marks unreachable backends as unhealthy and restores them when they come back
+- **YAML configuration** — listen address, algorithm, backends, and health-check settings without recompiling
 
 ## Requirements
 
@@ -43,6 +44,8 @@ backends:
   - address: "127.0.0.1:9001"
   - address: "127.0.0.1:9002"
 ```
+
+Only `"round_robin"` is supported. Any other value causes the process to exit with an error.
 
 ### 2. Start fake HTTP backends (for testing)
 
@@ -88,15 +91,17 @@ Or use curl:
 curl http://127.0.0.1:8085/
 ```
 
+Send several requests to see round robin in action — responses should alternate between healthy backends (e.g. `Hello from 9000`, `Hello from 9001`, …). Backends that fail health checks are skipped until they recover.
+
 ## Configuration reference
 
 | Field | Description |
 |-------|-------------|
 | `listen.address` | Address the load balancer binds to (e.g. `127.0.0.1:8085`) |
+| `algorithm` | Load-balancing algorithm; must be `"round_robin"` |
 | `health_check.interval_seconds` | How often to probe each backend |
 | `health_check.timeout_seconds` | TCP connect timeout for each probe |
 | `backends[].address` | Backend host/port (e.g. `127.0.0.1:9000`) |
-| `algorithm` | Reserved for future use (`round_robin` is not wired up yet) |
 
 ## How it works
 
@@ -105,17 +110,19 @@ Client                    Load Balancer                  Backend
   |                            |                            |
   |---- TCP connect ---------->|                            |
   |---- request bytes -------->|                            |
+  |                            |---- pick next healthy ---->|
   |                            |---- TCP connect ---------->|
   |                            |---- forward request ------>|
   |                            |<---- response bytes -------|
   |<---- response bytes -------|                            |
 ```
 
-1. Bind a `TcpListener` on the configured address.
-2. Spawn a background task that runs health checks every N seconds.
-3. For each accepted client connection:
+1. Load and validate `configs.yaml` (algorithm must be `round_robin`).
+2. Build a backend pool and spawn a background health-check task.
+3. Bind a `TcpListener` on the configured address.
+4. For each accepted client connection:
    - Read up to 4096 bytes from the client.
-   - Pick a healthy backend from the pool.
+   - Pick the next healthy backend using round robin.
    - Open a TCP connection to that backend, send the request, read the response.
    - Write the backend response back to the client.
 
@@ -128,11 +135,13 @@ load-balancer/
 ├── configs.yaml       # Runtime configuration
 ├── Cargo.toml
 └── src/
-    ├── main.rs        # Entry point, accept loop, request forwarding
+    ├── main.rs        # Entry point (calls load_balancer::run)
+    ├── lib.rs         # App setup: config, pool, health checks, listener
     ├── config.rs      # Config structs (serde)
-    ├── constants.rs
+    ├── healthcheck.rs # Periodic backend probing
+    ├── request.rs     # Accept loop, request forwarding, proxy I/O
     └── pool/
-        ├── mod.rs     # Pool, server selection, health checks
+        ├── mod.rs     # Pool, round-robin selection, health checks
         └── server.rs  # Backend server state
 ```
 
@@ -160,16 +169,18 @@ cargo run
 
 | Symptom | Likely cause |
 |---------|----------------|
-| `Connection refused` on startup | A client connected but no backend is listening on the configured port |
+| `unknown algorithm` on startup | `algorithm` in config is not `"round_robin"` |
+| `Connection refused` | A client connected but no healthy backend is listening on the configured port |
 | Client hangs, nothing printed | Client connected but sent no data; use `printf 'GET / ...'` or `curl` |
 | `nc -l -p 9001` exits immediately | GNU netcat handles one connection per invocation; wrap it in `while true` |
 | Backend never receives traffic | Health check may consume a one-shot `nc` listener; use a loop |
+| Same backend every time | Only one backend is healthy; dead backends are skipped until health check passes |
 | Port 5000 behaves oddly on macOS | AirPlay Receiver often owns port 5000; use 9000+ instead |
 
 ## Current limitations
 
 - **Raw TCP proxy** — no HTTP parsing; bytes are forwarded as-is. Backends must speak whatever protocol the client sends.
+- **Round robin only** — no weighted, least-connections, or other algorithms.
 - **Single-threaded request handling** — each client is handled sequentially in the accept loop (no per-connection tasks yet).
 - **Health check side effects** — a TCP probe counts as a connection; one-shot `nc` backends will exit after a probe.
-- **`algorithm` in config** — not implemented; server selection uses the first healthy backend from the current pool index.
-- **Dead backends** — a failed health check sets `is_alive = false`; a later successful probe does not currently flip it back to `true`.
+- **No connect retry** — if the selected backend refuses the connection, the request fails instead of trying the next healthy backend.
