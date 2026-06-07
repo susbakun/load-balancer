@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{fs::File, sync::Arc, time::Duration};
 
 use anyhow::{Result, anyhow};
