@@ -19,9 +19,11 @@ pub use config::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // deserializing the config fiile
     let file = File::open("configs.yaml")?;
     let config: Config = serde_yaml::from_reader(file)?;
 
+    // setup the pool of servers
     let pool = Pool::new(config.backends);
     let pool = Arc::new(Mutex::new(pool));
 

@@ -26,18 +26,28 @@ impl Pool {
 
     pub fn next_server(&mut self) -> Option<&Server> {
         let n = self.servers.len();
-        let mut current_ind = self.next_available_ind;
+        let end = self.next_available_ind;
+        let mut current_ind = (self.next_available_ind + 1) % n;
 
-        while current_ind < n {
+        // checking servers one by one except
+        // current one
+        while current_ind != end {
             let server = &self.servers[current_ind];
             if server.is_alive {
+                self.next_available_ind = current_ind;
                 return Some(server);
             }
 
-            current_ind += 1;
+            current_ind = (current_ind + 1) % n;
         }
 
-        self.next_available_ind = current_ind + 1;
+        // check the current server if
+        // there wasn't any other available
+        // around it
+
+        if self.servers[current_ind].is_alive {
+            return Some(&self.servers[current_ind]);
+        }
 
         None
     }
