@@ -42,11 +42,12 @@ impl Pool {
         None
     }
 
-    pub fn test_servers(&mut self) {
+    pub fn test_servers(&mut self, healthcheck_config: &HealthCheckConfig) {
+        let time_out = Duration::from_secs(healthcheck_config.timeout_seconds);
         for server in self.servers.iter_mut() {
             let target_address = &server.address.parse().unwrap();
 
-            match TcpStream::connect_timeout(target_address, THREE_SECS) {
+            match TcpStream::connect_timeout(target_address, time_out) {
                 Ok(_) => println!("Port is open: {target_address}"),
                 Err(err) => {
                     server.is_alive = false;
