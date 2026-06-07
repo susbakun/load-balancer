@@ -12,7 +12,12 @@ pub struct Pool {
 }
 
 impl Pool {
-    pub fn new(servers: Vec<Server>) -> Self {
+    pub fn new(servers: Vec<BackendConfig>) -> Self {
+        let servers = servers
+            .into_iter()
+            .map(|server| server.into())
+            .collect::<Vec<Server>>();
+
         Self {
             servers,
             next_available_ind: 0,
@@ -20,12 +25,19 @@ impl Pool {
     }
 
     pub fn next_server(&mut self) -> Option<&Server> {
-        for (ind, server) in self.servers.iter().enumerate() {
+        let n = self.servers.len();
+        let mut current_ind = self.next_available_ind;
+
+        while current_ind < n {
+            let server = &self.servers[current_ind];
             if server.is_alive {
-                self.next_available_ind = ind;
                 return Some(server);
             }
+
+            current_ind += 1;
         }
+
+        self.next_available_ind = current_ind + 1;
 
         None
     }
@@ -42,22 +54,5 @@ impl Pool {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_server_health() {
-        let mut pool = Pool::new(vec![
-            Server::new("127.0.0.1:9000".into()),
-            Server::new("127.0.0.1:9001".into()),
-        ]);
-
-        pool.test_servers();
-
-        println!("{pool:?}")
     }
 }

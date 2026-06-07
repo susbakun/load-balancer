@@ -1,0 +1,15 @@
+listen:
+  address: "127.0.0.1:8085"
+
+algorithm: "round_robin"
+
+health_check:
+  interval_seconds: 5
+  timeout_seconds: 2
+
+backends:
+  - address: "127.0.0.1:9000"
+
+  - address: "127.0.0.1:9001"
+
+  - address: "127.0.0.1:9002"

@@ -1,12 +1,10 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{fs::File, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    sync::Mutex,
     time,
 };
 
@@ -15,23 +13,25 @@ pub use crate::constants::*;
 mod constants;
 mod pool;
 use pool::*;
+mod config;
+pub use config::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:8085").await?;
-    let pool = Pool::new(vec![
-        Server::new("127.0.0.1:9000".into()),
-        Server::new("127.0.0.1:9001".into()),
-    ]);
+    let file = File::open("configs.yaml")?;
+    let config: Config = serde_yaml::from_reader(file)?;
+
+    let listener = TcpListener::bind(config.listen.address).await?;
+    let pool = Pool::new(config.backends);
     let pool = Arc::new(Mutex::new(pool));
 
     let mut interval = time::interval(Duration::from_secs(5));
 
-    let pool_1 = Arc::clone(&pool);
+    let pool_cloned = Arc::clone(&pool);
     tokio::spawn(async move {
         loop {
             interval.tick().await;
-            let mut pool_gaurd = pool_1.lock().unwrap();
+            let mut pool_gaurd = pool_cloned.lock().await;
             pool_gaurd.test_servers();
         }
     });
@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
         let mut buf = [0; 4096];
         let n = client_stream.read(&mut buf).await?;
 
-        let mut pool_gaurd = pool.lock().unwrap();
+        let mut pool_gaurd = pool.lock().await;
 
         if let Some(next_server) = pool_gaurd.next_server() {
             let address = &next_server.address;
