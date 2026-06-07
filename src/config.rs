@@ -3,6 +3,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub listen: ListenConfig,
+    pub algorithm: String,
     pub health_check: HealthCheckConfig,
     pub backends: Vec<BackendConfig>,
 }
