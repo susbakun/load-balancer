@@ -1,6 +1,7 @@
 use super::*;
 
 mod server;
+use rand::distr::{Distribution, weighted::WeightedIndex};
 pub use server::*;
 use tokio::time::{Instant, timeout};
 
@@ -30,7 +31,7 @@ impl Pool {
 
         return match algorithm {
             "round_robin" => self.round_robin(),
-            "weighted_round_robin" => self.round_robin(),
+            "weighted_round_robin" => self.weighted_round_robin(),
             _ => None,
         };
     }
@@ -48,7 +49,22 @@ impl Pool {
     }
 
     fn weighted_round_robin(&mut self) -> Option<&Server> {
-        todo!()
+        let weights = self
+            .servers
+            .iter()
+            .filter(|server| server.weight != 0.0)
+            .map(|server| server.weight)
+            .collect::<Vec<f32>>();
+
+        let dist = WeightedIndex::new(weights).unwrap();
+        let mut rng = rand::rng();
+
+        let index = dist.sample(&mut rng);
+
+        self.next_available_ind = index;
+        println!("selected {:?}", self.servers[index]);
+
+        Some(&self.servers[index])
     }
 
     pub async fn test_servers(&mut self, healthcheck_config: &HealthCheckConfig) -> Result<()> {
@@ -59,7 +75,7 @@ impl Pool {
 
             match timeout(time_out, connect_future).await? {
                 Ok(mut stream) => {
-                    let latency = calculate_latency(&mut stream).await?;
+                    let latency = Self::calculate_latency(&mut stream).await?;
                     server.weight = 1.0 / latency;
 
                     server.is_alive = true;
@@ -74,16 +90,16 @@ impl Pool {
         }
         Ok(())
     }
-}
 
-pub async fn calculate_latency(stream: &mut TcpStream) -> Result<f32> {
-    let start = Instant::now();
+    async fn calculate_latency(stream: &mut TcpStream) -> Result<f32> {
+        let start = Instant::now();
 
-    stream.write_all(b"ping").await?;
-    let mut buf = [0u8; 4];
-    stream.read_exact(&mut buf).await?;
+        stream.write_all(b"ping").await?;
+        let mut buf = [0u8; 4];
+        stream.read_exact(&mut buf).await?;
 
-    let latency = start.elapsed().as_micros() as f32;
+        let latency = start.elapsed().as_micros() as f32;
 
-    Ok(latency)
+        Ok(latency)
+    }
 }

@@ -24,9 +24,9 @@ use types::*;
 pub async fn run() -> Result<()> {
     let config = read_config()?;
 
-    if config.algorithm != "round_robin" {
-        return Err(anyhow!("unknown algorithm"));
-    }
+    // if config.algorithm != "round_robin" {
+    //     return Err(anyhow!("unknown algorithm"));
+    // }
 
     // setup the pool of servers
     let pool = setup_pool(config.backends);

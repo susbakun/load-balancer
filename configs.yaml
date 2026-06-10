@@ -1,7 +1,7 @@
 listen:
   address: "127.0.0.1:8085"
 
-algorithm: "round_robin"
+algorithm: "weighted_round_robin"
 
 health_check:
   interval_seconds: 5
