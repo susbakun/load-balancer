@@ -26,7 +26,7 @@ use constants::*;
 pub async fn run() -> Result<()> {
     let config = read_config()?;
 
-    if available_algos.contains(&config.algorithm.as_str()) {
+    if !AVAILABLE_ALGOS.contains(&config.algorithm.as_str()) {
         return Err(anyhow!("unknown algorithm"));
     }
 
