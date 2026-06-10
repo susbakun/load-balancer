@@ -18,6 +18,8 @@ mod healthcheck;
 use healthcheck::*;
 mod request;
 use request::*;
+mod types;
+use types::*;
 
 pub async fn run() -> Result<()> {
     let config = read_config()?;
@@ -35,7 +37,7 @@ pub async fn run() -> Result<()> {
 
     // setup tcp listener to provided address
     let pool_cloned = Arc::clone(&pool);
-    setup_listener(pool_cloned, config.listen.address).await
+    setup_listener(pool_cloned, config.listen.address, config.algorithm).await
 }
 
 fn read_config() -> Result<Config> {

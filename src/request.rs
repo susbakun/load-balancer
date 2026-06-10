@@ -3,20 +3,24 @@ use std::convert::Infallible;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::client::conn::http1 as client_http1;
-use hyper::server::conn::http1;
+use hyper::server::conn::http1 as server_http1;
 use hyper::{Request, Response, body::Incoming};
 use hyper_util::rt::TokioIo;
 
 use super::*;
 
-type BoxBody = http_body_util::combinators::UnsyncBoxBody<Bytes, hyper::Error>;
-
-pub async fn setup_listener(pool: Arc<Mutex<Pool>>, listen_address: String) -> Result<()> {
+pub async fn setup_listener(
+    pool: Arc<Mutex<Pool>>,
+    listen_address: String,
+    algorithm: String,
+) -> Result<()> {
     let listener = TcpListener::bind(listen_address).await?;
     while let Ok((client_stream, _)) = listener.accept().await {
         let pool_cloned = Arc::clone(&pool);
+        let owned_algorithm = algorithm.clone();
         tokio::spawn(async move {
-            if let Err(err) = handle_connection(pool_cloned, client_stream).await {
+            if let Err(err) = handle_connection(pool_cloned, client_stream, &owned_algorithm).await
+            {
                 eprintln!("connection error: {err}");
             }
         });
@@ -24,17 +28,21 @@ pub async fn setup_listener(pool: Arc<Mutex<Pool>>, listen_address: String) -> R
     Ok(())
 }
 
-async fn handle_connection(pool: Arc<Mutex<Pool>>, client_stream: TcpStream) -> Result<()> {
+async fn handle_connection(
+    pool: Arc<Mutex<Pool>>,
+    client_stream: TcpStream,
+    algorithm: &String,
+) -> Result<()> {
     let backend_address = {
         let mut pool = pool.lock().await;
-        pool.next_server()
+        pool.next_server(algorithm)
             .map(|server| server.address.clone())
             .ok_or_else(|| anyhow!("couldn't find a healthy server"))?
     };
 
     let io = TokioIo::new(client_stream);
 
-    http1::Builder::new()
+    server_http1::Builder::new()
         .serve_connection(
             io,
             hyper::service::service_fn(move |req| {

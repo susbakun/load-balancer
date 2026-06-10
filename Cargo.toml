@@ -12,3 +12,4 @@ hyper = { version = "1", features = ["full"] }
 bytes = "1"
 http-body-util = "0.1"
 hyper-util = { version = "0.1", features = ["full"] }
+rand = "0.10.1"

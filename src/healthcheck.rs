@@ -1,5 +1,3 @@
-use tokio::time::Instant;
-
 use super::*;
 
 pub async fn set_healthcheck_interval(
@@ -12,21 +10,7 @@ pub async fn set_healthcheck_interval(
         loop {
             interval.tick().await;
             let mut pool_gaurd = pool.lock().await;
-            pool_gaurd.test_servers(&healthcheck_config);
+            let _ = pool_gaurd.test_servers(&healthcheck_config).await;
         }
     });
-}
-
-pub async fn calculate_latency(ip_addr: &str) -> Result<Duration> {
-    let start = Instant::now();
-
-    let mut stream = TcpStream::connect(ip_addr).await?;
-
-    stream.write_all(b"ping").await?;
-    let mut buf = [0u8; 4];
-    stream.read_exact(&mut buf).await?;
-
-    let latency = start.elapsed();
-
-    Ok(latency)
 }
