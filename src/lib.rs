@@ -20,13 +20,15 @@ mod request;
 use request::*;
 mod types;
 use types::*;
+mod constants;
+use constants::*;
 
 pub async fn run() -> Result<()> {
     let config = read_config()?;
 
-    // if config.algorithm != "round_robin" {
-    //     return Err(anyhow!("unknown algorithm"));
-    // }
+    if available_algos.contains(&config.algorithm.as_str()) {
+        return Err(anyhow!("unknown algorithm"));
+    }
 
     // setup the pool of servers
     let pool = setup_pool(config.backends);

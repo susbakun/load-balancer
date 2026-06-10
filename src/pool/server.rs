@@ -18,11 +18,7 @@ impl Server {
 }
 
 impl From<BackendConfig> for Server {
-    fn from(value: BackendConfig) -> Self {
-        Self {
-            address: value.address,
-            is_alive: true,
-            weight: 1.0,
-        }
+    fn from(backend_config: BackendConfig) -> Self {
+        Self::new(backend_config.address)
     }
 }
