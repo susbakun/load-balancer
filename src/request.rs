@@ -1,19 +1,30 @@
+use std::convert::Infallible;
+
+use bytes::Bytes;
+use http_body_util::{BodyExt, Full};
+use hyper::client::conn::http1 as client_http1;
+use hyper::server::conn::http1;
+use hyper::{Request, Response, body::Incoming};
+use hyper_util::rt::TokioIo;
+
 use super::*;
+
+type BoxBody = http_body_util::combinators::UnsyncBoxBody<Bytes, hyper::Error>;
 
 pub async fn setup_listener(pool: Arc<Mutex<Pool>>, listen_address: String) -> Result<()> {
     let listener = TcpListener::bind(listen_address).await?;
-    while let Ok((mut client_stream, _)) = listener.accept().await {
+    while let Ok((client_stream, _)) = listener.accept().await {
         let pool_cloned = Arc::clone(&pool);
-        if let Err(_) = direct_request(pool_cloned, &mut client_stream).await {
-            continue;
-        }
+        tokio::spawn(async move {
+            if let Err(err) = handle_connection(pool_cloned, client_stream).await {
+                eprintln!("connection error: {err}");
+            }
+        });
     }
     Ok(())
 }
 
-async fn direct_request(pool: Arc<Mutex<Pool>>, client_stream: &mut TcpStream) -> Result<()> {
-    let request = read_request(client_stream).await?;
-
+async fn handle_connection(pool: Arc<Mutex<Pool>>, client_stream: TcpStream) -> Result<()> {
     let backend_address = {
         let mut pool = pool.lock().await;
         pool.next_server()
@@ -21,25 +32,70 @@ async fn direct_request(pool: Arc<Mutex<Pool>>, client_stream: &mut TcpStream) -
             .ok_or_else(|| anyhow!("couldn't find a healthy server"))?
     };
 
-    let response = proxy_request(&backend_address, &request).await?;
-    client_stream
-        .write_all(&response)
+    let io = TokioIo::new(client_stream);
+
+    http1::Builder::new()
+        .serve_connection(
+            io,
+            hyper::service::service_fn(move |req| {
+                let backend = backend_address.clone();
+                async move { serve_request(&backend, req).await }
+            }),
+        )
+        .await?;
+
+    Ok(())
+}
+
+async fn serve_request(
+    backend: &str,
+    req: Request<Incoming>,
+) -> Result<Response<BoxBody>, Infallible> {
+    match proxy_request(backend, req).await {
+        Ok(response) => Ok(response),
+        Err(err) => {
+            eprintln!("proxy error: {err}");
+            Ok(bad_gateway())
+        }
+    }
+}
+
+fn bad_gateway() -> Response<BoxBody> {
+    Response::builder()
+        .status(502)
+        .body(
+            Full::new(Bytes::from_static(b"Bad Gateway"))
+                .map_err(|_| unreachable!())
+                .boxed_unsync(),
+        )
+        .expect("valid 502 response")
+}
+
+async fn proxy_request(
+    backend_address: &str,
+    request: Request<Incoming>,
+) -> Result<Response<BoxBody>> {
+    let stream = TcpStream::connect(backend_address).await?;
+    let io = TokioIo::new(stream);
+
+    let (mut sender, conn) = client_http1::Builder::new().handshake(io).await?;
+
+    tokio::spawn(async move {
+        if let Err(err) = conn.await {
+            eprintln!("backend connection error: {err}");
+        }
+    });
+
+    let backend_response = sender.send_request(request).await?;
+    let (parts, body) = backend_response.into_parts();
+    let body = body
+        .collect()
         .await
-        .map_err(|err| anyhow!("Write error: {err}"))
-}
+        .map_err(|err| anyhow!("failed to read backend body: {err}"))?
+        .to_bytes();
 
-async fn read_request(client_stream: &mut TcpStream) -> Result<Vec<u8>> {
-    let mut buf = [0; 4096];
-    let n = client_stream.read(&mut buf).await?;
-    Ok(buf[..n].to_vec())
-}
-
-async fn proxy_request(backend_address: &str, request: &[u8]) -> Result<Vec<u8>> {
-    let mut backend_stream = TcpStream::connect(backend_address).await?;
-    backend_stream.write_all(request).await?;
-    backend_stream.shutdown().await?;
-
-    let mut response = Vec::new();
-    backend_stream.read_to_end(&mut response).await?;
-    Ok(response)
+    Ok(Response::from_parts(
+        parts,
+        Full::new(body).map_err(|_| unreachable!()).boxed_unsync(),
+    ))
 }
