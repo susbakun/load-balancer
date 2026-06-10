@@ -209,4 +209,6 @@ cargo run
 
 ## License
 
-MIT (or your preferred license — update this section as needed).
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+Copyright (c) 2026 AmirSaeed AryanMehr
