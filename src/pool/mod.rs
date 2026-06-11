@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering::Relaxed;
+
 use super::*;
 
 mod server;
@@ -7,7 +9,7 @@ use tokio::time::{Instant, timeout};
 
 #[derive(Debug)]
 pub struct Pool {
-    servers: Vec<Server>,
+    pub servers: Vec<Arc<Server>>,
     next_available_ind: usize,
 }
 
@@ -15,8 +17,8 @@ impl Pool {
     pub fn new(servers: Vec<BackendConfig>) -> Self {
         let servers = servers
             .into_iter()
-            .map(|server| server.into())
-            .collect::<Vec<Server>>();
+            .map(|server| Arc::new(server.into()))
+            .collect::<Vec<Arc<Server>>>();
 
         Self {
             servers,
@@ -24,7 +26,7 @@ impl Pool {
         }
     }
 
-    pub fn next_server(&mut self, algorithm: &str) -> Option<&Server> {
+    pub fn next_server(&mut self, algorithm: &str) -> Option<Arc<Server>> {
         if self.servers.is_empty() {
             return None;
         }
@@ -36,24 +38,26 @@ impl Pool {
         };
     }
 
-    fn round_robin(&mut self) -> Option<&Server> {
+    fn round_robin(&mut self) -> Option<Arc<Server>> {
         let n = self.servers.len();
         for _ in 0..n {
             let idx = self.next_available_ind;
             self.next_available_ind = (self.next_available_ind + 1) % n;
-            if self.servers[idx].is_alive {
-                return Some(&self.servers[idx]);
+            let is_alive = self.servers[idx].is_alive.load(Relaxed);
+
+            if is_alive {
+                return Some(self.servers[idx].clone());
             }
         }
         None
     }
 
-    fn weighted_round_robin(&mut self) -> Option<&Server> {
+    fn weighted_round_robin(&mut self) -> Option<Arc<Server>> {
         let weights = self
             .servers
             .iter()
-            .filter(|server| server.weight != 0.0)
-            .map(|server| server.weight)
+            .map(|server| server.get_weight())
+            .filter(|weight| *weight != 0.0)
             .collect::<Vec<f32>>();
 
         let dist = WeightedIndex::new(weights).unwrap();
@@ -62,28 +66,28 @@ impl Pool {
         let index = dist.sample(&mut rng);
 
         self.next_available_ind = index;
-        println!("selected {:?}", self.servers[index]);
 
-        Some(&self.servers[index])
+        Some(self.servers[index].clone())
     }
 
     pub async fn test_servers(&mut self, healthcheck_config: &HealthCheckConfig) -> Result<()> {
         let time_out = Duration::from_secs(healthcheck_config.timeout_seconds);
         for server in self.servers.iter_mut() {
-            let target_address = &server.address;
+            let target_address = &server.address.clone();
             let connect_future = TcpStream::connect(target_address);
 
             match timeout(time_out, connect_future).await? {
                 Ok(mut stream) => {
                     let latency = Self::calculate_latency(&mut stream).await?;
-                    server.weight = 1.0 / latency;
+                    server.set_weight(1.0 / latency);
+                    server.is_alive.store(true, Relaxed);
 
-                    server.is_alive = true;
                     println!("Port is open: {target_address}, latency: {latency}");
                 }
                 Err(err) => {
-                    server.weight = 0.0;
-                    server.is_alive = false;
+                    server.set_weight(0.0);
+                    server.is_alive.store(false, Relaxed);
+
                     eprintln!("port is closed: {target_address} - {err}");
                 }
             }

@@ -18,6 +18,7 @@ pub async fn setup_listener(
     while let Ok((client_stream, _)) = listener.accept().await {
         let pool_cloned = Arc::clone(&pool);
         let owned_algorithm = algorithm.clone();
+
         tokio::spawn(async move {
             if let Err(err) = handle_connection(pool_cloned, client_stream, &owned_algorithm).await
             {
@@ -25,6 +26,7 @@ pub async fn setup_listener(
             }
         });
     }
+
     Ok(())
 }
 
@@ -33,39 +35,45 @@ async fn handle_connection(
     client_stream: TcpStream,
     algorithm: &String,
 ) -> Result<()> {
-    let backend_address = {
+    let backend = {
         let mut pool = pool.lock().await;
         pool.next_server(algorithm)
-            .map(|server| server.address.clone())
             .ok_or_else(|| anyhow!("couldn't find a healthy server"))?
     };
 
     let io = TokioIo::new(client_stream);
 
-    server_http1::Builder::new()
+    if let Err(err) = server_http1::Builder::new()
         .serve_connection(
             io,
             hyper::service::service_fn(move |req| {
-                let backend = backend_address.clone();
-                async move { serve_request(&backend, req).await }
+                let backend = backend.clone();
+                async move { serve_request(backend, req).await }
             }),
         )
-        .await?;
+        .await
+    {
+        eprintln!("coulnd't proxy the request: {err}")
+    }
 
     Ok(())
 }
 
 async fn serve_request(
-    backend: &str,
+    backend: Arc<Server>,
     req: Request<Incoming>,
 ) -> Result<Response<BoxBody>, Infallible> {
-    match proxy_request(backend, req).await {
+    let _garud = backend.track_active_request();
+
+    let res = match proxy_request(&backend.address, req).await {
         Ok(response) => Ok(response),
         Err(err) => {
             eprintln!("proxy error: {err}");
             Ok(bad_gateway())
         }
-    }
+    };
+
+    res
 }
 
 fn bad_gateway() -> Response<BoxBody> {

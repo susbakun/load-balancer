@@ -9,8 +9,8 @@ pub async fn set_healthcheck_interval(
     tokio::spawn(async move {
         loop {
             interval.tick().await;
-            let mut pool_gaurd = pool.lock().await;
-            let _ = pool_gaurd.test_servers(&healthcheck_config).await;
+            let mut pool = pool.lock().await;
+            let _ = pool.test_servers(&healthcheck_config).await;
         }
     });
 }

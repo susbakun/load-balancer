@@ -339,6 +339,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rand",
+ "scopeguard",
  "serde",
  "serde_yaml",
  "tokio",
