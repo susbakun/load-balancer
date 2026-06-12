@@ -34,6 +34,7 @@ impl Pool {
         return match algorithm {
             "round_robin" => self.round_robin(),
             "weighted_round_robin" => self.weighted_round_robin(),
+            "least_connections" => self.least_connection(),
             _ => None,
         };
     }
@@ -43,7 +44,7 @@ impl Pool {
         for _ in 0..n {
             let idx = self.next_available_ind;
             self.next_available_ind = (self.next_available_ind + 1) % n;
-            let is_alive = self.servers[idx].is_alive.load(Relaxed);
+            let is_alive = self.servers[idx].get_is_alive();
 
             if is_alive {
                 return Some(self.servers[idx].clone());
@@ -56,11 +57,15 @@ impl Pool {
         let weights = self
             .servers
             .iter()
+            .filter(|server| server.get_is_alive())
             .map(|server| server.get_weight())
             .filter(|weight| *weight != 0.0)
             .collect::<Vec<f32>>();
 
-        let dist = WeightedIndex::new(weights).unwrap();
+        let Ok(dist) = WeightedIndex::new(weights) else {
+            return None;
+        };
+
         let mut rng = rand::rng();
 
         let index = dist.sample(&mut rng);
@@ -68,6 +73,26 @@ impl Pool {
         self.next_available_ind = index;
 
         Some(self.servers[index].clone())
+    }
+
+    fn least_connection(&mut self) -> Option<Arc<Server>> {
+        let mut selected = None;
+        let mut least_connection_count = usize::MAX;
+
+        for server in &self.servers {
+            if !server.get_is_alive() {
+                continue;
+            }
+
+            let active_requests = server.active_requests.load(Relaxed);
+
+            if active_requests < least_connection_count {
+                least_connection_count = active_requests;
+                selected = Some(server.clone());
+            }
+        }
+
+        selected
     }
 
     pub async fn test_servers(&mut self, healthcheck_config: &HealthCheckConfig) -> Result<()> {
@@ -80,13 +105,13 @@ impl Pool {
                 Ok(mut stream) => {
                     let latency = Self::calculate_latency(&mut stream).await?;
                     server.set_weight(1.0 / latency);
-                    server.is_alive.store(true, Relaxed);
+                    server.set_is_alive(true);
 
                     println!("Port is open: {target_address}, latency: {latency}");
                 }
                 Err(err) => {
                     server.set_weight(0.0);
-                    server.is_alive.store(false, Relaxed);
+                    server.set_is_alive(false);
 
                     eprintln!("port is closed: {target_address} - {err}");
                 }

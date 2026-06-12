@@ -28,6 +28,14 @@ impl Server {
         f32::from_bits(self.weight.load(Relaxed))
     }
 
+    pub fn set_is_alive(&self, is_alive: bool) {
+        self.is_alive.store(is_alive, Relaxed);
+    }
+
+    pub fn get_is_alive(&self) -> bool {
+        self.is_alive.load(Relaxed)
+    }
+
     pub fn track_active_request(&self) -> impl Drop + '_ {
         self.active_requests.fetch_add(1, Relaxed);
 
