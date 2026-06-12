@@ -25,8 +25,9 @@ use constants::*;
 
 pub async fn run() -> Result<()> {
     let config = read_config()?;
+    let algorithm = config.algorithm;
 
-    if !AVAILABLE_ALGOS.contains(&config.algorithm.as_str()) {
+    if !AVAILABLE_ALGOS.contains(&algorithm.as_str()) {
         return Err(anyhow!("unknown algorithm"));
     }
 
@@ -35,11 +36,11 @@ pub async fn run() -> Result<()> {
 
     // set an interval for healthchecking the servers
     let pool_cloned = Arc::clone(&pool);
-    set_healthcheck_interval(config.health_check, pool_cloned).await;
+    set_healthcheck_interval(config.health_check, pool_cloned, &algorithm).await;
 
     // setup tcp listener to provided address
     let pool_cloned = Arc::clone(&pool);
-    setup_listener(pool_cloned, config.listen.address, config.algorithm).await
+    setup_listener(pool_cloned, config.listen.address, algorithm).await
 }
 
 fn read_config() -> Result<Config> {

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering::Relaxed};
 
-use crate::BackendConfig;
+use crate::{BackendConfig, constants::ALPHA};
 
 #[derive(Debug)]
 pub struct Server {
@@ -15,13 +15,33 @@ impl Server {
         Self {
             address,
             is_alive: AtomicBool::new(true),
-            weight: AtomicU32::new(1),
+            weight: AtomicU32::new(1.0f32.to_bits()),
             active_requests: AtomicUsize::new(0),
         }
     }
 
-    pub fn set_weight(&self, weight: f32) {
-        self.weight.store(weight.to_bits(), Relaxed);
+    pub fn update_weight(&self, new_latency: f32, algorithm: &String) {
+        // we first check if the server is available
+        // if so we check for the alogrithm on update
+        // it based on that
+        let new_weight = if new_latency == 0.0 {
+            0.0
+        } else if algorithm == "PEWMA" {
+            let old_weight = self.get_weight();
+
+            let ewma_latency = if old_weight == 0.0 {
+                new_latency
+            } else {
+                let old_latency = 1.0 / old_weight;
+                (ALPHA * new_latency) + ((1.0 - ALPHA) * old_latency)
+            };
+
+            1.0 / ewma_latency
+        } else {
+            1.0 / new_latency
+        };
+
+        self.weight.store(new_weight.to_bits(), Relaxed);
     }
 
     pub fn get_weight(&self) -> f32 {

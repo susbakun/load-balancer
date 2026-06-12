@@ -1,7 +1,7 @@
 listen:
   address: "127.0.0.1:8085"
 
-algorithm: "least_connections"
+algorithm: "PEWMA"
 
 health_check:
   interval_seconds: 5

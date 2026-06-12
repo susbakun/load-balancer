@@ -35,6 +35,10 @@ impl Pool {
             "round_robin" => self.round_robin(),
             "weighted_round_robin" => self.weighted_round_robin(),
             "least_connections" => self.least_connection(),
+            // we update the weights in test_servers method
+            // and use the weighted_round_robin for choosing
+            // next server
+            "PEWMA" => self.weighted_round_robin(),
             _ => None,
         };
     }
@@ -95,7 +99,11 @@ impl Pool {
         selected
     }
 
-    pub async fn test_servers(&mut self, healthcheck_config: &HealthCheckConfig) -> Result<()> {
+    pub async fn test_servers(
+        &mut self,
+        healthcheck_config: &HealthCheckConfig,
+        algorithm: &String,
+    ) -> Result<()> {
         let time_out = Duration::from_secs(healthcheck_config.timeout_seconds);
         for server in self.servers.iter_mut() {
             let target_address = &server.address.clone();
@@ -104,13 +112,13 @@ impl Pool {
             match timeout(time_out, connect_future).await? {
                 Ok(mut stream) => {
                     let latency = Self::calculate_latency(&mut stream).await?;
-                    server.set_weight(1.0 / latency);
+                    server.update_weight(latency, algorithm);
                     server.set_is_alive(true);
 
                     println!("Port is open: {target_address}, latency: {latency}");
                 }
                 Err(err) => {
-                    server.set_weight(0.0);
+                    server.update_weight(0.0, algorithm);
                     server.set_is_alive(false);
 
                     eprintln!("port is closed: {target_address} - {err}");
