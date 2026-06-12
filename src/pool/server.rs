@@ -5,9 +5,9 @@ use crate::{BackendConfig, constants::ALPHA};
 #[derive(Debug)]
 pub struct Server {
     pub address: String,
-    pub(super) is_alive: AtomicBool,
-    pub(super) weight: AtomicU32,
-    pub active_requests: AtomicUsize,
+    is_alive: AtomicBool,
+    weight: AtomicU32,
+    pub(super) active_requests: AtomicUsize,
 }
 
 impl Server {
